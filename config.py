@@ -2,6 +2,8 @@
 # config.py — Configuration centrale du système de réponse automatique
 # =============================================================================
 
+import os
+
 # --- Comptes Gmail -----------------------------------------------------------
 
 ACCOUNTS = {
@@ -40,7 +42,12 @@ GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/gmail.modify",   # pour marquer comme lu / ajouter label
+    "https://www.googleapis.com/auth/spreadsheets",   # pour Google Sheets
 ]
+
+# --- Google Sheets -----------------------------------------------------------
+
+SHEETS_ID = os.environ.get("GOOGLE_SHEETS_ID", "")
 
 # --- Paramètres de traitement ------------------------------------------------
 

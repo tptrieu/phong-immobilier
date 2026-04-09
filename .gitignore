@@ -3,6 +3,7 @@ token_centris.json
 token_remax.json
 processed_emails.json
 pending_followup.json
+sheets_id.json
 __pycache__/
 *.pyc
 .env

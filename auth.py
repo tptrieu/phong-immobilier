@@ -8,6 +8,7 @@
 import os
 import json
 import base64
+from typing import Optional
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -22,14 +23,11 @@ _TOKEN_ENV_MAP = {
 }
 
 
-def get_gmail_service(token_file: str, email: str):
+def get_credentials(token_file: str, email: str) -> Credentials:
     """
-    Retourne un service Gmail authentifié.
-
-    Ordre de résolution des credentials :
-    1. Variable d'environnement GMAIL_TOKEN_<NOM> (Railway / serveur)
-    2. Fichier local token_*.json                 (Mac / développement)
-    3. Flux OAuth2 interactif                     (premier lancement local seulement)
+    Retourne l'objet Credentials authentifié (sans construire le service).
+    Utilisé par les modules qui ont besoin des credentials directement
+    (ex: Google Sheets via gspread).
     """
     creds = _load_token(token_file)
 
@@ -43,7 +41,6 @@ def get_gmail_service(token_file: str, email: str):
                 f"[AUTH] Aucun token valide pour {email}. "
                 f"Définir la variable d'environnement {_TOKEN_ENV_MAP.get(token_file, 'GMAIL_TOKEN_?')}."
             )
-        # Local : ouvrir le navigateur
         print(f"\n[AUTH] Connexion requise pour : {email}")
         print(f"       Le navigateur va s'ouvrir. Connectez-vous avec ce compte.")
         creds_info = _load_client_secrets()
@@ -52,6 +49,19 @@ def get_gmail_service(token_file: str, email: str):
         _save_token_if_local(creds, token_file)
         print(f"[AUTH] Token sauvegardé dans {token_file}")
 
+    return creds
+
+
+def get_gmail_service(token_file: str, email: str):
+    """
+    Retourne un service Gmail authentifié.
+
+    Ordre de résolution des credentials :
+    1. Variable d'environnement GMAIL_TOKEN_<NOM> (Railway / serveur)
+    2. Fichier local token_*.json                 (Mac / développement)
+    3. Flux OAuth2 interactif                     (premier lancement local seulement)
+    """
+    creds = get_credentials(token_file, email)
     return build("gmail", "v1", credentials=creds)
 
 
@@ -59,7 +69,7 @@ def get_gmail_service(token_file: str, email: str):
 # Helpers privés
 # -----------------------------------------------------------------------------
 
-def _load_token(token_file: str) -> Credentials | None:
+def _load_token(token_file: str) -> Optional[Credentials]:
     """Charge le token depuis l'env var (base64) en priorité, sinon depuis le fichier."""
     env_var = _TOKEN_ENV_MAP.get(token_file)
     if env_var:

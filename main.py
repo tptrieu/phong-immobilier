@@ -14,12 +14,13 @@ import schedule
 from datetime import datetime
 
 from config import ACCOUNTS
-from auth import get_gmail_service
+from auth import get_gmail_service, get_credentials
 from email_processor import fetch_unread_emails
 from language_detector import detect_language
 from responder import send_reply, add_processed_label
 from tracker import is_processed, mark_processed
 from followup import add_pending_lead, check_and_send_followups
+from sheets import log_lead
 
 
 # -----------------------------------------------------------------------------
@@ -36,9 +37,16 @@ def process_account(source: str, dry_run: bool = False):
     print(f"{'─'*50}")
 
     try:
-        service = get_gmail_service(account["token_file"], account["email"])
+        creds = get_credentials(account["token_file"], account["email"])
     except RuntimeError as e:
         print(f"  [AUTH] {e}")
+        return 0, None
+
+    try:
+        from googleapiclient.discovery import build
+        service = build("gmail", "v1", credentials=creds)
+    except Exception as e:
+        print(f"  [AUTH] Impossible de construire le service Gmail: {e}")
         return 0, None
 
     emails = fetch_unread_emails(service, account["sender_filter"])
@@ -70,6 +78,7 @@ def process_account(source: str, dry_run: bool = False):
                 add_processed_label(service, email_id)
                 mark_processed(email_id)
                 add_pending_lead(email, lang, source)
+                log_lead(creds, email, lang, source)
             else:
                 mark_processed(email_id)
             replied += 1
