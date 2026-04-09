@@ -7,6 +7,7 @@
 
 import os
 import json
+import base64
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -59,11 +60,12 @@ def get_gmail_service(token_file: str, email: str):
 # -----------------------------------------------------------------------------
 
 def _load_token(token_file: str) -> Credentials | None:
-    """Charge le token depuis l'env var en priorité, sinon depuis le fichier."""
+    """Charge le token depuis l'env var (base64) en priorité, sinon depuis le fichier."""
     env_var = _TOKEN_ENV_MAP.get(token_file)
     if env_var:
-        token_json = os.environ.get(env_var)
-        if token_json:
+        token_b64 = os.environ.get(env_var)
+        if token_b64:
+            token_json = _b64_decode(token_b64)
             return Credentials.from_authorized_user_info(json.loads(token_json), GMAIL_SCOPES)
 
     if os.path.exists(token_file):
@@ -73,12 +75,18 @@ def _load_token(token_file: str) -> Credentials | None:
 
 
 def _load_client_secrets() -> dict:
-    """Charge les secrets OAuth2 depuis l'env var ou le fichier local."""
-    env_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
-    if env_json:
-        return json.loads(env_json)
+    """Charge les secrets OAuth2 depuis l'env var (base64) ou le fichier local."""
+    creds_b64 = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+    if creds_b64:
+        return json.loads(_b64_decode(creds_b64))
     with open(CREDENTIALS_FILE, "r") as f:
         return json.load(f)
+
+
+def _b64_decode(value: str) -> str:
+    """Décode une valeur base64, tolère le padding manquant."""
+    padded = value.strip() + "=" * (-len(value.strip()) % 4)
+    return base64.b64decode(padded).decode("utf-8")
 
 
 def _save_token_if_local(creds: Credentials, token_file: str):
