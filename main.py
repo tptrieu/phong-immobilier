@@ -19,13 +19,17 @@ from email_processor import fetch_unread_emails
 from language_detector import detect_language
 from responder import send_reply, add_processed_label
 from tracker import is_processed, mark_processed
+from followup import add_pending_lead, check_and_send_followups
 
 
 # -----------------------------------------------------------------------------
 # Traitement d'un compte
 # -----------------------------------------------------------------------------
 
-def process_account(source: str, dry_run: bool = False) -> int:
+def process_account(source: str, dry_run: bool = False):
+    """
+    Traite un compte Gmail et retourne (replied_count, service_or_None).
+    """
     account = ACCOUNTS[source]
     print(f"\n{'─'*50}")
     print(f"Compte : {account['email']}  [{source.upper()}]")
@@ -35,13 +39,13 @@ def process_account(source: str, dry_run: bool = False) -> int:
         service = get_gmail_service(account["token_file"], account["email"])
     except RuntimeError as e:
         print(f"  [AUTH] {e}")
-        return 0
+        return 0, None
 
     emails = fetch_unread_emails(service, account["sender_filter"])
 
     if not emails:
         print("  Aucun nouveau message.")
-        return 0
+        return 0, service
 
     print(f"  {len(emails)} message(s) trouvé(s).")
     replied = 0
@@ -65,6 +69,7 @@ def process_account(source: str, dry_run: bool = False) -> int:
             if not dry_run:
                 add_processed_label(service, email_id)
                 mark_processed(email_id)
+                add_pending_lead(email, lang, source)
             else:
                 mark_processed(email_id)
             replied += 1
@@ -73,7 +78,7 @@ def process_account(source: str, dry_run: bool = False) -> int:
         except Exception as e:
             print(f"  [ERREUR] {e}")
 
-    return replied
+    return replied, service
 
 
 # -----------------------------------------------------------------------------
@@ -88,8 +93,18 @@ def run_all(dry_run: bool = False):
         print(f"  MODE : DRY RUN (aucun email envoyé)")
     print(f"{'='*50}")
 
-    total = sum(process_account(s, dry_run=dry_run) for s in ["centris", "remax", "realtor"])
+    services = {}
+    total = 0
+    for source in ["centris", "remax", "realtor"]:
+        replied, service = process_account(source, dry_run=dry_run)
+        total += replied
+        if service is not None:
+            services[source] = service
+
     print(f"\n  Total : {total} réponse(s) envoyée(s).")
+
+    # Vérification des relances 48h
+    check_and_send_followups(services, dry_run=dry_run)
 
 
 # -----------------------------------------------------------------------------

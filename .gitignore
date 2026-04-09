@@ -2,6 +2,7 @@ credentials.json
 token_centris.json
 token_remax.json
 processed_emails.json
+pending_followup.json
 __pycache__/
 *.pyc
 .env
