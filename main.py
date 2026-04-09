@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 # =============================================================================
-# main.py — Point d'entrée du système de réponse automatique
+# main.py — Système de réponse automatique Phong Immobilier
 # =============================================================================
 # Usage :
-#   python main.py              → traite les deux boîtes (mode réel)
-#   python main.py --dry-run   → simule sans envoyer
-#   python main.py --setup     → authentifie les deux comptes seulement
+#   python main.py            → scheduler interne (Railway / serveur)
+#   python main.py --once     → exécution unique et exit (test, cron externe)
+#   python main.py --dry-run  → exécution unique sans envoyer
+#   python main.py --setup    → authentification OAuth2 interactive (local)
 
 import argparse
-import sys
+import time
+import schedule
 from datetime import datetime
 
 from config import ACCOUNTS
@@ -19,8 +21,11 @@ from responder import send_reply, add_processed_label
 from tracker import is_processed, mark_processed
 
 
-def process_account(source: str, dry_run: bool = False):
-    """Traite tous les nouveaux emails d'un compte (centris ou remax)."""
+# -----------------------------------------------------------------------------
+# Traitement d'un compte
+# -----------------------------------------------------------------------------
+
+def process_account(source: str, dry_run: bool = False) -> int:
     account = ACCOUNTS[source]
     print(f"\n{'─'*50}")
     print(f"Compte : {account['email']}  [{source.upper()}]")
@@ -32,7 +37,7 @@ def process_account(source: str, dry_run: bool = False):
         print(f"  [AUTH] {e}")
         return 0
 
-    emails  = fetch_unread_emails(service, account["sender_filter"])
+    emails = fetch_unread_emails(service, account["sender_filter"])
 
     if not emails:
         print("  Aucun nouveau message.")
@@ -44,12 +49,15 @@ def process_account(source: str, dry_run: bool = False):
     for email in emails:
         email_id = email["id"]
 
-        # Vérification anti-doublon
         if is_processed(email_id):
             print(f"  [SKIP] {email_id} — déjà traité.")
             continue
 
-        lang = detect_language(email.get("buyer_message") or email["body"] or "", subject=email["subject"])
+        lang = detect_language(
+            email.get("buyer_message") or email["body"] or "",
+            subject=email["subject"],
+            sender=email["sender"],
+        )
         print(f"  [→] {email['reply_to'][:40]} | langue: {lang.upper()} | objet: {email['subject'][:40]}")
 
         try:
@@ -58,7 +66,7 @@ def process_account(source: str, dry_run: bool = False):
                 add_processed_label(service, email_id)
                 mark_processed(email_id)
             else:
-                mark_processed(email_id)  # marquer quand même en dry-run pour éviter répétitions
+                mark_processed(email_id)
             replied += 1
         except FileNotFoundError as e:
             print(f"  [ERREUR] Gabarit manquant : {e}")
@@ -68,40 +76,68 @@ def process_account(source: str, dry_run: bool = False):
     return replied
 
 
+# -----------------------------------------------------------------------------
+# Cycle complet (tous les comptes)
+# -----------------------------------------------------------------------------
+
+def run_all(dry_run: bool = False):
+    print(f"\n{'='*50}")
+    print(f"  Phong Immobilier — Réponse automatique")
+    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    if dry_run:
+        print(f"  MODE : DRY RUN (aucun email envoyé)")
+    print(f"{'='*50}")
+
+    total = sum(process_account(s, dry_run=dry_run) for s in ["centris", "remax", "realtor"])
+    print(f"\n  Total : {total} réponse(s) envoyée(s).")
+
+
+# -----------------------------------------------------------------------------
+# Authentification interactive (local seulement)
+# -----------------------------------------------------------------------------
+
 def setup_auth():
-    """Authentifie les deux comptes Gmail (premier lancement)."""
     print("=== Configuration OAuth2 ===")
     for source, account in ACCOUNTS.items():
         print(f"\nCompte {source.upper()} : {account['email']}")
         get_gmail_service(account["token_file"], account["email"])
         print(f"  OK — token sauvegardé dans {account['token_file']}")
-    print("\nAuthentification terminée. Vous pouvez maintenant lancer : python main.py")
+    print("\nAuthentification terminée.")
 
+
+# -----------------------------------------------------------------------------
+# Point d'entrée
+# -----------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Système de réponse automatique — Phong Immobilier")
-    parser.add_argument("--dry-run", action="store_true", help="Simuler sans envoyer")
-    parser.add_argument("--setup",   action="store_true", help="Configurer les deux comptes Gmail")
-    parser.add_argument("--account", choices=["centris", "remax", "realtor"], help="Traiter un seul compte")
+    parser = argparse.ArgumentParser(description="Réponse automatique — Phong Immobilier")
+    parser.add_argument("--dry-run", action="store_true", help="Simuler sans envoyer (exécution unique)")
+    parser.add_argument("--once",    action="store_true", help="Exécuter une seule fois et quitter")
+    parser.add_argument("--setup",   action="store_true", help="Configurer les comptes Gmail (local)")
     args = parser.parse_args()
 
     if args.setup:
         setup_auth()
         return
 
-    print(f"\n{'='*50}")
-    print(f"  Phong Immobilier — Réponse automatique")
-    print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    if args.dry_run:
-        print(f"  MODE : DRY RUN (aucun email envoyé)")
-    print(f"{'='*50}")
+    if args.dry_run or args.once:
+        run_all(dry_run=args.dry_run)
+        return
 
-    sources = [args.account] if args.account else ["centris", "remax", "realtor"]
-    total = 0
-    for source in sources:
-        total += process_account(source, dry_run=args.dry_run)
+    # --- Mode scheduler (Railway) ---
+    print(f"[SCHEDULER] Démarrage — vérifications à 08:00, 13:00, 21:00")
+    print(f"[SCHEDULER] {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    print(f"\n  Total : {total} réponse(s) envoyée(s).")
+    # Exécuter une fois au démarrage pour traiter les emails en attente
+    run_all()
+
+    schedule.every().day.at("08:00").do(run_all)
+    schedule.every().day.at("13:00").do(run_all)
+    schedule.every().day.at("21:00").do(run_all)
+
+    while True:
+        schedule.run_pending()
+        time.sleep(30)
 
 
 if __name__ == "__main__":

@@ -4,28 +4,38 @@
 
 from langdetect import detect, LangDetectException
 
-# Sujets fixes émis par Centris et Realtor.ca selon la langue
+# Centris : l'adresse expéditeur détermine la langue à 100 %
+# Observation constante depuis 2021
+_SENDER_LANG = {
+    "do-not-reply@centris.ca":    "en",
+    "nepasrepondre@centris.ca":   "fr",
+}
+
+# Sujets fixes RE/MAX et Realtor.ca
 _SUBJECT_FR = [
     "demande d'information",
     "demande générale",
     "demande de visite",
-    "nepasrepondre",
 ]
 _SUBJECT_EN = [
     "information request",
     "general inquiry",
     "visit request",
-    "do-not-reply",
 ]
 
 
-def detect_language(text: str, subject: str = "") -> str:
+def detect_language(text: str, subject: str = "", sender: str = "") -> str:
     """
-    Détecte la langue en deux étapes :
-    1. Sujet — mots-clés fixes Centris/Realtor (100 % fiable)
-    2. Corps  — langdetect (fallback)
-    Par défaut : 'fr'.
+    Détecte la langue selon trois étapes, par ordre de priorité :
+    1. Expéditeur Centris (100 % fiable)
+    2. Sujet RE/MAX / Realtor
+    3. Corps du message via langdetect (fallback)
     """
+    if sender:
+        lang = _SENDER_LANG.get(sender.lower().strip())
+        if lang:
+            return lang
+
     if subject:
         lang = _detect_from_subject(subject)
         if lang:
@@ -35,7 +45,6 @@ def detect_language(text: str, subject: str = "") -> str:
 
 
 def _detect_from_subject(subject: str) -> str:
-    """Retourne 'fr', 'en', ou '' si aucun pattern reconnu."""
     s = subject.lower()
     if any(kw in s for kw in _SUBJECT_FR):
         return "fr"
@@ -45,7 +54,6 @@ def _detect_from_subject(subject: str) -> str:
 
 
 def _detect_from_body(text: str) -> str:
-    """Détection statistique via langdetect. Défaut : 'fr'."""
     if not text.strip():
         return "fr"
     try:
