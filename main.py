@@ -26,7 +26,12 @@ def process_account(source: str, dry_run: bool = False):
     print(f"Compte : {account['email']}  [{source.upper()}]")
     print(f"{'─'*50}")
 
-    service = get_gmail_service(account["token_file"], account["email"])
+    try:
+        service = get_gmail_service(account["token_file"], account["email"])
+    except RuntimeError as e:
+        print(f"  [AUTH] {e}")
+        return 0
+
     emails  = fetch_unread_emails(service, account["sender_filter"])
 
     if not emails:
