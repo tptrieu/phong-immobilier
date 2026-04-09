@@ -7,20 +7,39 @@ import os
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+from bs4 import BeautifulSoup
+
 from config import ACCOUNTS, PROCESSED_LABEL
 
 
 def load_template(source: str, lang: str) -> str:
     """
-    Charge le gabarit de réponse.
+    Charge le gabarit de réponse HTML.
     source : 'centris' ou 'remax'
     lang   : 'fr' ou 'en'
+    Falls back to .txt if .html not found.
     """
-    path = os.path.join("templates", f"{source}_{lang}.txt")
-    if not os.path.exists(path):
-        raise FileNotFoundError(f"Gabarit introuvable : {path}")
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    html_path = os.path.join("templates", f"{source}_{lang}.html")
+    if os.path.exists(html_path):
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read()
+    # Fallback to plain text
+    txt_path = os.path.join("templates", f"{source}_{lang}.txt")
+    if os.path.exists(txt_path):
+        with open(txt_path, "r", encoding="utf-8") as f:
+            return f.read()
+    raise FileNotFoundError(f"Gabarit introuvable : {html_path}")
+
+
+def _html_to_plain(html: str) -> str:
+    """Converts HTML template to plain text using BeautifulSoup."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup.find_all(["br", "p", "div", "li", "td", "tr"]):
+        tag.append("\n")
+    text = soup.get_text(separator="")
+    lines = [line.strip() for line in text.splitlines()]
+    clean = "\n".join(line for line in lines if line)
+    return clean
 
 
 def send_reply(service, source: str, email: dict, lang: str, dry_run: bool = False) -> bool:
@@ -52,9 +71,19 @@ def send_reply(service, source: str, email: dict, lang: str, dry_run: bool = Fal
 
     # --- Substitution des placeholders dans le corps ---
     # {buyer_name} → prénom si trouvé, sinon chaîne vide (salutation par défaut)
-    body_text = template.replace("{buyer_name}", f" {buyer_name}," if buyer_name else ",")
+    buyer_name_sub = f" {buyer_name}," if buyer_name else ","
+    body_html = template.replace("{buyer_name}", buyer_name_sub)
     # {property_address} dans le corps (ligne Objet/Subject du gabarit)
-    body_text = body_text.replace("{property_address}", property_address or email["subject"])
+    body_html = body_html.replace("{property_address}", property_address or email["subject"])
+
+    # Determine if template is HTML or plain text
+    is_html = body_html.lstrip().startswith("<!DOCTYPE") or body_html.lstrip().startswith("<html")
+
+    if is_html:
+        body_plain = _html_to_plain(body_html)
+    else:
+        body_plain = body_html
+        body_html = None
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
@@ -63,7 +92,10 @@ def send_reply(service, source: str, email: dict, lang: str, dry_run: bool = Fal
     msg["In-Reply-To"] = email["id"]
     msg["References"]  = email["id"]
 
-    msg.attach(MIMEText(body_text, "plain", "utf-8"))
+    # Plain text first (fallback), HTML second (preferred by email clients)
+    msg.attach(MIMEText(body_plain, "plain", "utf-8"))
+    if body_html:
+        msg.attach(MIMEText(body_html, "html", "utf-8"))
 
     if dry_run:
         print(f"\n{'='*60}")
@@ -73,7 +105,8 @@ def send_reply(service, source: str, email: dict, lang: str, dry_run: bool = Fal
         print(f"[DRY RUN] Source      : {source.upper()}")
         print(f"[DRY RUN] Prénom      : {buyer_name or '(non trouvé)'}")
         print(f"[DRY RUN] Adresse     : {property_address or '(non trouvée)'}")
-        print(f"[DRY RUN] Corps :\n{body_text}")
+        print(f"[DRY RUN] Format      : {'HTML + plain text' if body_html else 'plain text only'}")
+        print(f"[DRY RUN] Corps (plain) :\n{body_plain[:300]}...")
         print('='*60)
         return True
 
