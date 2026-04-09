@@ -20,7 +20,7 @@ _SUBJECT_FR = [
 _SUBJECT_EN = [
     "information request",
     "general inquiry",
-    "visit request",
+    "showing request",
 ]
 
 
